@@ -92,3 +92,9 @@ shapefiles/
 # Configuración local
 config/local_*.json
 .secrets
+
+# Archivos de prueba generados localmente
+/test_chart_*.png
+
+# Evitar que redirecciones tipo 2>nul creen un archivo trackeable
+/nul

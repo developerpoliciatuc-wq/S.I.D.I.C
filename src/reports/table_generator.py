@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..models.report_data import PeriodData, ReportData
-from ..core.period_comparator import PeriodComparator
+from ..core.period_comparator import PeriodComparator, MultiPeriodComparator
 from ..utils.constants import (
     DIAS_SEMANA,
     FranjaHoraria,
@@ -91,6 +91,78 @@ class TableGenerator:
             columna_valor: total,
             'Porcentaje': '100,00%'
         })
+        
+        return pd.DataFrame(data)
+    
+    def _generar_tabla_comparativa_multi(
+        self,
+        titulo_columna: str,
+        comparaciones: list,
+        totales: list = None,
+        total_label: str = 'TOTAL'
+    ) -> pd.DataFrame:
+        """
+        Genera una tabla comparativa para múltiples períodos (2-4).
+        
+        Args:
+            titulo_columna: Nombre de la primera columna (categoría)
+            comparaciones: Lista de MultiComparacionItem
+            totales: Lista opcional de totales por período [total_p1, total_p2, ...]
+        
+        Returns:
+            DataFrame con columnas dinámicas según cantidad de períodos
+        """
+        periodos = self.report.periodos
+        num_periodos = len(periodos)
+        
+        data = []
+        
+        for comp in comparaciones:
+            fila = {titulo_columna: comp.categoria.replace('_', ' ')}
+            
+            # Agregar valores de cada período
+            for i, p in enumerate(periodos):
+                fila[p.rango_fechas] = comp.valores[i]
+            
+            # Columnas de diferencia y variación
+            if num_periodos == 2:
+                # Para 2 períodos: columnas simples Dif. y Var.%
+                fila['Dif.'] = comp.diferencia_formateada(1)
+                fila['Var.%'] = f"{comp.porcentaje_formateado(1)} {comp.tendencia_icono(1)}"
+            else:
+                # Para 3-4 períodos: columnas separadas por período
+                for i in range(1, num_periodos):
+                    fila[f'Dif. P{i+1}'] = comp.diferencia_formateada(i)
+                    fila[f'Var. P{i+1}'] = f"{comp.porcentaje_formateado(i)} {comp.tendencia_icono(i)}"
+            
+            data.append(fila)
+        
+        # Agregar fila de total si se proporcionan totales
+        if totales and len(totales) == num_periodos:
+            fila_total = {titulo_columna: total_label}
+            
+            for i, p in enumerate(periodos):
+                fila_total[p.rango_fechas] = totales[i]
+            
+            if num_periodos == 2:
+                diff = totales[1] - totales[0]
+                pct = ((totales[1] - totales[0]) / totales[0] * 100) if totales[0] > 0 else 0
+                signo_d = "+" if diff > 0 else ""
+                signo_p = "+" if pct > 0 else ""
+                icono = "▲" if diff > 0 else ("▼" if diff < 0 else "─")
+                fila_total['Dif.'] = f"{signo_d}{diff}"
+                fila_total['Var.%'] = f"{signo_p}{pct:.2f}% {icono}"
+            else:
+                for i in range(1, num_periodos):
+                    diff = totales[i] - totales[0]
+                    pct = ((totales[i] - totales[0]) / totales[0] * 100) if totales[0] > 0 else 0
+                    signo_d = "+" if diff > 0 else ""
+                    signo_p = "+" if pct > 0 else ""
+                    icono = "▲" if diff > 0 else ("▼" if diff < 0 else "─")
+                    fila_total[f'Dif. P{i+1}'] = f"{signo_d}{diff}"
+                    fila_total[f'Var. P{i+1}'] = f"{signo_p}{pct:.2f}% {icono}"
+            
+            data.append(fila_total)
         
         return pd.DataFrame(data)
     
@@ -274,55 +346,27 @@ class TableGenerator:
     
     def generar_tabla_delitos_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de delitos entre períodos.
+        Genera tabla comparativa de delitos entre múltiples períodos (2-4).
+        
+        Columnas: Categoría | P1 | P2 | [P3] | [P4] | Dif P2 | Var P2 | [Dif P3] | [Var P3] | [Dif P4] | [Var P4]
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_delitos()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        # Validar que ambos períodos existan
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_delitos()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_delitos()
-            
-            data = []
-            total_p1 = p1.total_hechos
-            total_p2 = p2.total_hechos
-            
-            for comp in comparaciones:
-                data.append({
-                    'DELITOS CON MODALIDADES': comp.categoria.replace('_', ' '),
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    '%': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_a, total_p1)
-                    ),
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    '% ': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    ),
-                    'Variación': comp.porcentaje_formateado if hasattr(comp, 'porcentaje_formateado') else 'N/A',
-                    'Tendencia': comp.tendencia_icono if hasattr(comp, 'tendencia_icono') else ''
-                })
-            
-            # Total
-            total_comp = comparator.resumen_general().get('total_hechos')
-            if total_comp:
-                data.append({
-                    'DELITOS CON MODALIDADES': 'TOTAL DE HECHOS',
-                    p1.rango_fechas: total_p1,
-                    '%': '100,00%',
-                    p2.rango_fechas: total_p2,
-                    '% ': '100,00%',
-                    'Variación': total_comp.porcentaje_formateado if hasattr(total_comp, 'porcentaje_formateado') else 'N/A',
-                    'Tendencia': total_comp.tendencia_icono if hasattr(total_comp, 'tendencia_icono') else ''
-                })
-            
-            return pd.DataFrame(data)
+            totales = [p.total_hechos for p in periodos]
+            return self._generar_tabla_comparativa_multi(
+                'DELITOS CON MODALIDADES',
+                comparaciones,
+                totales=totales,
+                total_label='TOTAL DE HECHOS'
+            )
         
         except Exception as e:
             print(f"Error generando tabla comparativa de delitos: {e}")
@@ -350,44 +394,27 @@ class TableGenerator:
     
     def generar_tabla_dias_semana_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de hechos por día de la semana entre períodos.
+        Genera tabla comparativa de hechos por día de la semana entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_dias_semana()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_dias_semana()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_dias_semana()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'DÍAS DE LA SEMANA EN QUE OCURRIERON LOS HECHOS': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'PORCENTAJE': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    )
-                })
-            
-            # Total
-            data.append({
-                'DÍAS DE LA SEMANA EN QUE OCURRIERON LOS HECHOS': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'PORCENTAJE': '100,00%'
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'DÍAS DE LA SEMANA EN QUE OCURRIERON LOS HECHOS',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa días semana: {e}")
             return self.generar_tabla_dias_semana()
@@ -413,44 +440,27 @@ class TableGenerator:
     
     def generar_tabla_franja_horaria_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de hechos por franja horaria entre períodos.
+        Genera tabla comparativa de hechos por franja horaria entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_franja_horaria()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_franja_horaria()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_franjas_horarias()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'FRANJA HORARIA EN QUE OCURRIERON LOS HECHOS': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'PORCENTAJE': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    )
-                })
-            
-            # Total
-            data.append({
-                'FRANJA HORARIA EN QUE OCURRIERON LOS HECHOS': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'PORCENTAJE': '100,00%'
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'FRANJA HORARIA EN QUE OCURRIERON LOS HECHOS',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa franja horaria: {e}")
             return self.generar_tabla_franja_horaria()
@@ -476,44 +486,27 @@ class TableGenerator:
     
     def generar_tabla_movilidad_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de medios de movilidad entre períodos.
+        Genera tabla comparativa de medios de movilidad entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_movilidad()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_movilidad()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_movilidad()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'MEDIOS DE MOVILIDAD UTILIZADOS': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'PORCENTAJE': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    )
-                })
-            
-            # Total
-            data.append({
-                'MEDIOS DE MOVILIDAD UTILIZADOS': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'PORCENTAJE': '100,00%'
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'MEDIOS DE MOVILIDAD UTILIZADOS',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa movilidad: {e}")
             return self.generar_tabla_movilidad()
@@ -546,47 +539,30 @@ class TableGenerator:
     
     def generar_tabla_armas_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de armas/medios entre períodos.
+        Genera tabla comparativa de armas/medios entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_armas()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_armas()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_armas()
             
             if not comparaciones:
                 return self.generar_tabla_armas()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'MEDIOS O ARMAS UTILIZADAS EN ROBOS AGRAVADOS': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'PORCENTAJE': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    )
-                })
-            
-            # Total
-            data.append({
-                'MEDIOS O ARMAS UTILIZADAS EN ROBOS AGRAVADOS': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'PORCENTAJE': '100,00%'
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'MEDIOS O ARMAS UTILIZADAS EN ROBOS AGRAVADOS',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa armas: {e}")
             return self.generar_tabla_armas()
@@ -612,44 +588,27 @@ class TableGenerator:
     
     def generar_tabla_ambito_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de ámbito de ocurrencia entre períodos.
+        Genera tabla comparativa de ámbito de ocurrencia entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_ambito()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_ambito()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_ambitos()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'AMBITO DE OCURRENCIA DELICTUAL': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'PORCENTAJE': self._format_porcentaje(
-                        self._calcular_porcentaje(comp.valor_periodo_b, total_p2)
-                    )
-                })
-            
-            # Total
-            data.append({
-                'AMBITO DE OCURRENCIA DELICTUAL': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'PORCENTAJE': '100,00%'
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'AMBITO DE OCURRENCIA DELICTUAL',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa ámbito: {e}")
             return self.generar_tabla_ambito()
@@ -813,46 +772,30 @@ class TableGenerator:
     
     def generar_tabla_aprehendidos_clasificacion_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de aprehendidos por clasificación entre períodos.
+        Genera tabla comparativa de aprehendidos por clasificación entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_aprehendidos_clasificacion()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_aprehendidos_clasificacion()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_aprehendidos()
             
             if not comparaciones:
                 return self.generar_tabla_aprehendidos_clasificacion()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'CLASIFICACIÓN': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'DIFERENCIA': f"{'+' if comp.diferencia > 0 else ''}{comp.diferencia}"
-                })
-            
-            # Total
-            diff_total = total_p2 - total_p1
-            data.append({
-                'CLASIFICACIÓN': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'DIFERENCIA': f"{'+' if diff_total > 0 else ''}{diff_total}"
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'CLASIFICACIÓN',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa aprehendidos: {e}")
             return self.generar_tabla_aprehendidos_clasificacion()
@@ -878,43 +821,27 @@ class TableGenerator:
     
     def generar_tabla_esclarecimiento_comparativa(self) -> pd.DataFrame:
         """
-        Genera tabla comparativa de esclarecimiento entre períodos.
+        Genera tabla comparativa de esclarecimiento entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.generar_tabla_esclarecimiento()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return self.generar_tabla_esclarecimiento()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             comparaciones = comparator.comparar_esclarecimiento()
             
-            total_p1 = sum(c.valor_periodo_a for c in comparaciones)
-            total_p2 = sum(c.valor_periodo_b for c in comparaciones)
+            # Calcular totales por período
+            totales = [sum(comp.valores[i] for comp in comparaciones) for i in range(len(periodos))]
             
-            data = []
-            for comp in comparaciones:
-                data.append({
-                    'ESTADO DE ESCLARECIMIENTO': comp.categoria,
-                    p1.rango_fechas: comp.valor_periodo_a,
-                    p2.rango_fechas: comp.valor_periodo_b,
-                    'DIFERENCIA': f"{'+' if comp.diferencia > 0 else ''}{comp.diferencia}"
-                })
-            
-            # Total
-            diff_total = total_p2 - total_p1
-            data.append({
-                'ESTADO DE ESCLARECIMIENTO': 'TOTAL',
-                p1.rango_fechas: total_p1,
-                p2.rango_fechas: total_p2,
-                'DIFERENCIA': f"{'+' if diff_total > 0 else ''}{diff_total}"
-            })
-            
-            return pd.DataFrame(data)
+            return self._generar_tabla_comparativa_multi(
+                'ESTADO DE ESCLARECIMIENTO',
+                comparaciones,
+                totales
+            )
         except Exception as e:
             print(f"Error generando tabla comparativa esclarecimiento: {e}")
             return self.generar_tabla_esclarecimiento()
@@ -925,20 +852,17 @@ class TableGenerator:
     
     def generar_tabla_comparativa_general(self) -> pd.DataFrame:
         """
-        Genera cuadro comparativo general entre períodos.
+        Genera cuadro comparativo general entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return pd.DataFrame()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        # Validar que ambos períodos existan
-        if not p1 or not p2:
+        periodos = self.report.periodos
+        if len(periodos) < 2:
             return pd.DataFrame()
         
         try:
-            comparator = PeriodComparator(p1, p2)
+            comparator = MultiPeriodComparator(periodos)
             filas = comparator.to_comparison_table()
             
             if not filas:

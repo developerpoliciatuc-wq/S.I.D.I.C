@@ -370,8 +370,24 @@ class ReportData:
     
     @property
     def periodo_comparacion(self) -> Optional[PeriodData]:
-        """Segundo período (para comparación)."""
+        """Segundo período (para comparación). Mantiene compatibilidad."""
         return self.periodos[1] if len(self.periodos) > 1 else None
+    
+    @property
+    def periodos_comparacion(self) -> List[PeriodData]:
+        """Todos los períodos de comparación (excluyendo el principal)."""
+        return self.periodos[1:] if len(self.periodos) > 1 else []
+    
+    @property
+    def num_periodos(self) -> int:
+        """Número total de períodos."""
+        return len(self.periodos)
+    
+    def get_periodo(self, index: int) -> Optional[PeriodData]:
+        """Obtiene un período por índice."""
+        if 0 <= index < len(self.periodos):
+            return self.periodos[index]
+        return None
     
     # ═══════════════════════════════════════════════════════════════════════
     # MÉTODOS

@@ -24,7 +24,7 @@ except ImportError:
     np = None
 
 from ..models.report_data import PeriodData, ReportData
-from ..core.period_comparator import PeriodComparator
+from ..core.period_comparator import PeriodComparator, MultiPeriodComparator
 from ..utils.constants import (
     CHART_CONFIG,
     COLORES_DELITOS,
@@ -32,6 +32,14 @@ from ..utils.constants import (
     DIAS_SEMANA,
     FranjaHoraria,
 )
+
+# Colores para múltiples períodos (hasta 4)
+COLORES_PERIODOS = [
+    '#4169E1',  # Azul Royal (Período 1)
+    '#FF6347',  # Tomato (Período 2)
+    '#32CD32',  # Lime Green (Período 3)
+    '#FFD700',  # Gold (Período 4)
+]
 
 
 class ChartGenerator:
@@ -367,45 +375,172 @@ class ChartGenerator:
         return fig
     
     # ═══════════════════════════════════════════════════════════════════════
-    # GRÁFICOS COMPARATIVOS
+    # GRÁFICOS COMPARATIVOS (Multi-período: 2-4 períodos)
     # ═══════════════════════════════════════════════════════════════════════
     
     def grafico_comparativo_delitos(self) -> 'Figure':
         """
-        Genera gráfico comparativo de delitos entre períodos.
+        Genera gráfico comparativo de delitos entre múltiples períodos (2-4).
         """
         if not self.report.es_comparativo:
             return self.grafico_delitos()
         
-        p1 = self.report.periodo_principal
-        p2 = self.report.periodo_comparacion
-        
-        comparator = PeriodComparator(p1, p2)
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
         comparaciones = comparator.comparar_delitos()
         
         categorias = [c.categoria.replace('_', ' ') for c in comparaciones]
-        valores_p1 = [c.valor_periodo_a for c in comparaciones]
-        valores_p2 = [c.valor_periodo_b for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
         
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE DELITOS'
+        )
+
+    def grafico_comparativo_dias_semana(self) -> 'Figure':
+        """Genera gráfico comparativo de días de la semana entre múltiples períodos."""
+        if not self.report.es_comparativo:
+            return self.grafico_dias_semana()
+        
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
+        comparaciones = comparator.comparar_dias_semana()
+        
+        categorias = [c.categoria for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
+        
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE DÍAS DE LA SEMANA'
+        )
+
+    def grafico_comparativo_franja_horaria(self) -> 'Figure':
+        """Genera gráfico comparativo de franja horaria entre múltiples períodos."""
+        if not self.report.es_comparativo:
+            return self.grafico_franja_horaria()
+        
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
+        comparaciones = comparator.comparar_franjas_horarias()
+        
+        categorias = [c.categoria for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
+        
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE FRANJA HORARIA'
+        )
+
+    def grafico_comparativo_movilidad(self) -> 'Figure':
+        """Genera gráfico comparativo de movilidad entre múltiples períodos."""
+        if not self.report.es_comparativo:
+            return self.grafico_movilidad()
+        
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
+        comparaciones = comparator.comparar_movilidad()
+        
+        categorias = [c.categoria.replace('_', ' ') for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
+        
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE MEDIOS DE MOVILIDAD'
+        )
+
+    def grafico_comparativo_armas(self) -> 'Figure':
+        """Genera gráfico comparativo de armas entre múltiples períodos."""
+        if not self.report.es_comparativo:
+            return self.grafico_armas()
+        
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
+        comparaciones = comparator.comparar_armas()
+        
+        if not comparaciones:
+            return None
+            
+        categorias = [c.categoria.replace('_', ' ') for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
+        
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE ARMAS/MEDIOS EN ROBOS'
+        )
+
+    def grafico_comparativo_ambito(self) -> 'Figure':
+        """Genera gráfico comparativo de ámbito entre múltiples períodos."""
+        if not self.report.es_comparativo:
+            return self.grafico_ambito()
+        
+        periodos = self.report.periodos
+        comparator = MultiPeriodComparator(periodos)
+        comparaciones = comparator.comparar_ambitos()
+        
+        categorias = [c.categoria.replace('_', ' ') for c in comparaciones]
+        valores_por_periodo = [[c.valores[i] for c in comparaciones] for i in range(len(periodos))]
+        labels = [p.rango_fechas for p in periodos]
+        
+        return self._crear_grafico_comparativo_multi(
+            categorias, valores_por_periodo, labels,
+            'GRÁFICA COMPARATIVA DE ÁMBITO DE OCURRENCIA'
+        )
+
+    def _crear_grafico_comparativo_multi(
+        self,
+        categorias: List[str],
+        valores_por_periodo: List[List[int]],
+        labels: List[str],
+        titulo: str
+    ) -> 'Figure':
+        """
+        Helper para crear gráficos comparativos con múltiples períodos (2-4).
+        
+        Args:
+            categorias: Lista de categorías (eje X)
+            valores_por_periodo: Lista de listas de valores, una por período
+            labels: Lista de etiquetas para cada período
+            titulo: Título del gráfico
+        
+        Returns:
+            Figure de matplotlib
+        """
+        num_periodos = len(valores_por_periodo)
         fig, ax = self._create_figure(figsize=(12, 6))
         
         x = np.arange(len(categorias))
-        width = 0.35
         
-        bars1 = ax.bar(x - width/2, valores_p1, width, label=p1.rango_fechas[:20], color='#4169E1')
-        bars2 = ax.bar(x + width/2, valores_p2, width, label=p2.rango_fechas[:20], color='#FF6347')
+        # Ajustar ancho de barras según cantidad de períodos
+        if num_periodos == 2:
+            width = 0.35
+        elif num_periodos == 3:
+            width = 0.25
+        else:  # 4 períodos
+            width = 0.20
         
-        self._add_value_labels(ax, bars1, fontsize=8)
-        self._add_value_labels(ax, bars2, fontsize=8)
+        # Calcular offset para centrar las barras
+        total_width = width * num_periodos
+        offsets = [width * i - total_width / 2 + width / 2 for i in range(num_periodos)]
+        
+        # Crear barras para cada período
+        for i, (valores, label) in enumerate(zip(valores_por_periodo, labels)):
+            label_short = label[:18] if len(label) > 18 else label
+            color = COLORES_PERIODOS[i % len(COLORES_PERIODOS)]
+            bars = ax.bar(x + offsets[i], valores, width, label=label_short, color=color, edgecolor='#000000', linewidth=0.5)
+            self._add_value_labels(ax, bars, fontsize=7 if num_periodos > 2 else 8)
         
         ax.set_xticks(x)
-        ax.set_xticklabels(categorias, fontsize=9)
-        ax.legend()
+        ax.set_xticklabels(categorias, fontsize=8 if num_periodos > 2 else 9)
+        ax.legend(loc='upper right', fontsize=8)
         
-        self._finalize_chart(fig, ax, 'GRÁFICA COMPARATIVA DE DELITOS')
-        
+        self._finalize_chart(fig, ax, titulo)
         return fig
-    
+
     # ═══════════════════════════════════════════════════════════════════════
     # EXPORTACIÓN
     # ═══════════════════════════════════════════════════════════════════════
